@@ -63,6 +63,7 @@ if st.sidebar.button("Reset Demo Data"):
         "employees",
         "shifts",
         "availabilities",
+        "assignments",
         "staffing_requests",
         "next_request_id"
     ]:
@@ -93,16 +94,30 @@ availabilities = st.session_state.availabilities
 # Generate schedule and find gaps
 # --------------------------------------------------
 
-assignments = generate_schedule(
+
+# Create the initial schedule only once per session
+if "assignments" not in st.session_state:
+    st.session_state.assignments = generate_schedule(
+        employees,
+        shifts,
+        availabilities
+    )
+
+# Complete the schedule while preserving existing assignments
+st.session_state.assignments = generate_schedule(
     employees,
     shifts,
-    availabilities
+    availabilities,
+    existing_assignments=st.session_state.assignments
 )
+
+assignments = st.session_state.assignments
 
 gaps = find_staffing_gaps(
     shifts,
     assignments
 )
+
 
 
 # --------------------------------------------------

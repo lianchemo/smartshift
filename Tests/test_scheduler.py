@@ -5,6 +5,7 @@ from employee import Employee
 from shift import Shift
 from availability import Availability, AvailabilityStatus
 from scheduler import generate_schedule
+from assignment import Assignment
 
 
 def test_unavailable_employee_is_not_assigned():
@@ -158,6 +159,50 @@ def test_employee_does_not_exceed_max_shifts():
     }
 
     assert assigned_shift_ids == {201, 202}
+
+def test_existing_assignments_are_preserved():
+    # Arrange
+    employee1 = Employee(101, "Dana", 2, 2)
+    employee2 = Employee(102, "Noa", 2, 2)
+
+    shift = Shift(
+        201,
+        date(2026, 11, 1),
+        time(8, 0),
+        time(16, 0),
+        2
+    )
+
+    availabilities = [
+        Availability(101, 201, AvailabilityStatus.AVAILABLE),
+        Availability(102, 201, AvailabilityStatus.AVAILABLE)
+    ]
+
+    existing_assignments = [
+        Assignment(102, 201)
+    ]
+
+    # Act
+    updated_assignments = generate_schedule(
+        [employee1, employee2],
+        [shift],
+        availabilities,
+        existing_assignments=existing_assignments
+    )
+
+    # Assert
+    assert len(updated_assignments) == 2
+
+    assignment_pairs = {
+        (a.employee_id, a.shift_id)
+        for a in updated_assignments
+    }
+
+    assert assignment_pairs == {
+        (102, 201),
+        (101, 201)
+    }
+
 
 
 

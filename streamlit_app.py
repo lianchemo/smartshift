@@ -1,3 +1,14 @@
+from database.assignment_repository import get_all_assignments
+from database.converters import assignment_from_db
+from database.employee_repository import get_all_employees
+from database.shift_repository import get_all_shifts
+from database.availability_repository import get_all_availabilities
+
+from database.converters import (
+    employee_from_db,
+    shift_from_db,
+    availability_from_db
+)
 
 import streamlit as st
 
@@ -42,21 +53,23 @@ if "staffing_requests" not in st.session_state:
 if "next_request_id" not in st.session_state:
     st.session_state.next_request_id = 1
 
-if "employees" not in st.session_state:
-    st.session_state.employees = create_sample_employees()
 
-if "shifts" not in st.session_state:
-    st.session_state.shifts = create_sample_shifts()
+# Load demo data from SQLite
+employees = [
+    employee_from_db(row)
+    for row in get_all_employees()
+]
 
-if "availabilities" not in st.session_state:
-    st.session_state.availabilities = create_sample_availabilities(
-        st.session_state.employees,
-        st.session_state.shifts
-    )
+shifts = [
+    shift_from_db(row)
+    for row in get_all_shifts()
+]
 
+availabilities = [
+    availability_from_db(row)
+    for row in get_all_availabilities()
+]
 
-# Repair demo data saved with an older enum definition
-availabilities = st.session_state.availabilities
 
 if st.sidebar.button("Reset Demo Data"):
     for key in [
@@ -85,9 +98,7 @@ if has_old_status_objects:
 
 
 # Get current data from session state
-employees = st.session_state.employees
-shifts = st.session_state.shifts
-availabilities = st.session_state.availabilities
+
 
 
 # --------------------------------------------------
@@ -96,22 +107,16 @@ availabilities = st.session_state.availabilities
 
 
 # Create the initial schedule only once per session
-if "assignments" not in st.session_state:
-    st.session_state.assignments = generate_schedule(
-        employees,
-        shifts,
-        availabilities
-    )
 
-# Complete the schedule while preserving existing assignments
-st.session_state.assignments = generate_schedule(
-    employees,
-    shifts,
-    availabilities,
-    existing_assignments=st.session_state.assignments
-)
+# Read-only preview using current database availability
 
-assignments = st.session_state.assignments
+# Load the actual saved assignments from SQLite
+assignments = [
+    assignment_from_db(row)
+    for row in get_all_assignments()
+]
+
+
 
 gaps = find_staffing_gaps(
     shifts,

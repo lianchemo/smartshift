@@ -1,35 +1,33 @@
-from database.assignment_repository import get_all_assignments
-from database.converters import assignment_from_db
+
+import streamlit as st
+from database.request_service import (
+    accept_and_assign_request,
+    decline_staffing_request
+)
 from database.employee_repository import get_all_employees
 from database.shift_repository import get_all_shifts
 from database.availability_repository import get_all_availabilities
+from database.assignment_repository import get_all_assignments
+
+from database.staffing_request_repository import (
+    add_staffing_request,
+    get_all_staffing_requests
+)
 
 from database.converters import (
     employee_from_db,
     shift_from_db,
-    availability_from_db
+    availability_from_db,
+    assignment_from_db
 )
 
-import streamlit as st
-
-from sample_data import (
-    create_sample_employees,
-    create_sample_shifts,
-    create_sample_availabilities
-)
-from scheduler import generate_schedule
 from staffing import find_staffing_gaps
+
 from recommendations import (
     find_flexible_employees,
     filter_eligible_employees,
     rank_eligible_employees
 )
-from staffing_request import (
-    StaffingRequest,
-    RequestStatus,
-    apply_approved_request
-)
-from availability import AvailabilityStatus
 
 
 # --------------------------------------------------
@@ -44,17 +42,9 @@ st.set_page_config(
 
 
 # --------------------------------------------------
-# Initialize demo data
+# Load data from SQLite
 # --------------------------------------------------
 
-if "staffing_requests" not in st.session_state:
-    st.session_state.staffing_requests = []
-
-if "next_request_id" not in st.session_state:
-    st.session_state.next_request_id = 1
-
-
-# Load demo data from SQLite
 employees = [
     employee_from_db(row)
     for row in get_all_employees()
@@ -70,59 +60,32 @@ availabilities = [
     for row in get_all_availabilities()
 ]
 
-
-if st.sidebar.button("Reset Demo Data"):
-    for key in [
-        "employees",
-        "shifts",
-        "availabilities",
-        "assignments",
-        "staffing_requests",
-        "next_request_id"
-    ]:
-        st.session_state.pop(key, None)
-
-    st.rerun()
-
-
-has_old_status_objects = any(
-    not isinstance(availability.status, AvailabilityStatus)
-    for availability in availabilities
-)
-
-if has_old_status_objects:
-    st.session_state.availabilities = create_sample_availabilities(
-        st.session_state.employees,
-        st.session_state.shifts
-    )
-
-
-# Get current data from session state
-
-
-
-# --------------------------------------------------
-# Generate schedule and find gaps
-# --------------------------------------------------
-
-
-# Create the initial schedule only once per session
-
-# Read-only preview using current database availability
-
-# Load the actual saved assignments from SQLite
 assignments = [
     assignment_from_db(row)
     for row in get_all_assignments()
 ]
 
+staffing_requests = get_all_staffing_requests()
 
+
+# --------------------------------------------------
+# Calculate staffing gaps
+# --------------------------------------------------
 
 gaps = find_staffing_gaps(
     shifts,
     assignments
 )
 
+
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+
+employee_names = {
+    employee.employee_id: employee.name
+    for employee in employees
+}
 
 
 # --------------------------------------------------
@@ -136,6 +99,10 @@ view = st.sidebar.radio(
     ["Manager Dashboard", "Employee Portal"]
 )
 
+st.sidebar.caption(
+    "SQLite-backed demo"
+)
+
 
 # --------------------------------------------------
 # Manager Dashboard
@@ -144,9 +111,15 @@ view = st.sidebar.radio(
 if view == "Manager Dashboard":
 
     st.subheader("Manager Dashboard")
-    st.write("Overview of your weekly employee schedule")
 
+    st.write(
+        "Overview of your weekly employee schedule"
+    )
+
+    # ----------------------------------------------
     # Dashboard statistics
+    # ----------------------------------------------
+
     total_employees = len(employees)
     total_shifts = len(shifts)
     assigned_slots = len(assignments)
@@ -163,8 +136,15 @@ if view == "Manager Dashboard":
 
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Employees", total_employees)
-    col2.metric("Total Shifts", total_shifts)
+    col1.metric(
+        "Employees",
+        total_employees
+    )
+
+    col2.metric(
+        "Total Shifts",
+        total_shifts
+    )
 
     col3.metric(
         "Assigned Slots",
@@ -181,18 +161,22 @@ if view == "Manager Dashboard":
     # ----------------------------------------------
 
     st.divider()
+
     st.subheader("Weekly Shift Schedule")
 
     schedule_rows = []
 
     for shift in shifts:
+
         assigned_count = sum(
             1
             for assignment in assignments
             if assignment.shift_id == shift.shift_id
         )
 
-        missing = shift.required_employees - assigned_count
+        missing = (
+            shift.required_employees - assigned_count
+        )
 
         schedule_rows.append({
             "Shift ID": shift.shift_id,
@@ -203,7 +187,7 @@ if view == "Manager Dashboard":
             "Assigned": assigned_count,
             "Status": (
                 "✅ Covered"
-                if missing == 0
+                if missing <= 0
                 else "⚠️ Understaffed"
             )
         })
@@ -219,15 +203,22 @@ if view == "Manager Dashboard":
     # ----------------------------------------------
 
     st.divider()
+
     st.subheader("Staffing Recommendations")
 
     if not gaps:
-        st.success("All shifts are fully staffed!")
+
+        st.success(
+            "All shifts are fully staffed!"
+        )
 
     else:
+
         for gap in gaps:
+
             shift = next(
-                s for s in shifts
+                s
+                for s in shifts
                 if s.shift_id == gap["shift_id"]
             )
 
@@ -258,14 +249,17 @@ if view == "Manager Dashboard":
             )
 
             if not ranked:
+
                 st.info(
                     "No eligible flexible employees found."
                 )
 
             else:
+
                 recommendation_rows = []
 
                 for employee in ranked:
+
                     current_shifts = sum(
                         1
                         for assignment in assignments
@@ -276,8 +270,12 @@ if view == "Manager Dashboard":
                     recommendation_rows.append({
                         "Employee": employee.name,
                         "Current Shifts": current_shifts,
-                        "Preferred Shifts": employee.preferred_shifts,
-                        "Maximum Shifts": employee.max_shifts
+                        "Preferred Shifts": (
+                            employee.preferred_shifts
+                        ),
+                        "Maximum Shifts": (
+                            employee.max_shifts
+                        )
                     })
 
                 st.dataframe(
@@ -295,67 +293,85 @@ if view == "Manager Dashboard":
                 selected_employee_name = st.selectbox(
                     "Select an employee to contact",
                     options=list(employee_options.keys()),
-                    key=f"employee_select_{shift.shift_id}"
+                    key=(
+                        f"employee_select_"
+                        f"{shift.shift_id}"
+                    )
                 )
 
-                # Send request
-                if st.button(
-                    "Send Request",
-                    key=f"send_request_{shift.shift_id}"
-                ):
-                    employee_id = employee_options[
-                        selected_employee_name
-                    ]
+                selected_employee_id = employee_options[
+                    selected_employee_name
+                ]
 
-                    existing_request = any(
-                        request.employee_id == employee_id
-                        and request.shift_id == shift.shift_id
-                        for request in st.session_state.staffing_requests
+                # Check existing pending requests in SQLite
+                has_pending_request = any(
+                    request.employee_id
+                    == selected_employee_id
+                    and request.shift_id
+                    == shift.shift_id
+                    and request.status
+                    == "pending"
+                    for request in staffing_requests
+                )
+
+                if has_pending_request:
+
+                    st.info(
+                        "A pending request already exists "
+                        "for this employee and shift."
                     )
 
-                    if existing_request:
-                        st.warning(
-                            "A request already exists for "
-                            "this employee and shift."
-                        )
+                # ----------------------------------
+                # Send request to SQLite
+                # ----------------------------------
 
-                    else:
-                        request = StaffingRequest(
-                            st.session_state.next_request_id,
-                            employee_id,
+                if st.button(
+                    "Send Request",
+                    key=f"send_request_{shift.shift_id}",
+                    disabled=has_pending_request
+                ):
+
+                    try:
+
+                        request_id = add_staffing_request(
+                            selected_employee_id,
                             shift.shift_id
                         )
 
-                        st.session_state.staffing_requests.append(
-                            request
-                        )
+                    except ValueError as error:
 
-                        st.session_state.next_request_id += 1
+                        st.error(str(error))
+
+                    else:
 
                         st.success(
-                            f"Request created for "
+                            f"Request #{request_id} "
+                            f"created for "
                             f"{selected_employee_name}!"
                         )
 
+                        st.rerun()
+
     # ----------------------------------------------
-    # Staffing requests
+    # Staffing requests from SQLite
     # ----------------------------------------------
 
     st.divider()
+
     st.subheader("Staffing Requests")
 
-    if not st.session_state.staffing_requests:
-        st.info("No staffing requests yet.")
+    if not staffing_requests:
+
+        st.info(
+            "No staffing requests yet."
+        )
 
     else:
-        employee_names = {
-            employee.employee_id: employee.name
-            for employee in employees
-        }
 
         request_rows = []
 
-        for request in st.session_state.staffing_requests:
+        for request in staffing_requests:
+
             request_rows.append({
                 "Request ID": request.request_id,
                 "Employee": employee_names.get(
@@ -363,7 +379,7 @@ if view == "Manager Dashboard":
                     "Unknown"
                 ),
                 "Shift ID": request.shift_id,
-                "Status": request.status.value
+                "Status": request.status
             })
 
         st.dataframe(
@@ -377,11 +393,22 @@ if view == "Manager Dashboard":
 # Employee Portal
 # --------------------------------------------------
 
-
 else:
+
     st.subheader("Employee Portal")
 
-    st.write("View your shifts and staffing requests.")
+    st.write(
+        "View your shifts and staffing requests."
+    )
+
+    st.caption(
+        "Demo employee selection — "
+        "not a secure login system."
+    )
+
+    # ----------------------------------------------
+    # Employee selection
+    # ----------------------------------------------
 
     employee_options = {
         employee.name: employee.employee_id
@@ -393,34 +420,102 @@ else:
         options=list(employee_options.keys())
     )
 
-    selected_employee_id = employee_options[selected_name]
+    selected_employee_id = employee_options[
+        selected_name
+    ]
 
-    st.success(f"Welcome, {selected_name}!")
+    st.success(
+        f"Welcome, {selected_name}!"
+    )
 
     st.write(
         f"Employee ID: {selected_employee_id}"
     )
 
+    # ----------------------------------------------
+    # My assigned shifts
+    # ----------------------------------------------
+
     st.divider()
+
+    st.subheader("My Assigned Shifts")
+
+    my_assignments = [
+        assignment
+        for assignment in assignments
+        if assignment.employee_id
+        == selected_employee_id
+    ]
+
+    if not my_assignments:
+
+        st.info(
+            "You have no assigned shifts."
+        )
+
+    else:
+
+        my_shift_rows = []
+
+        for assignment in my_assignments:
+
+            shift = next(
+                (
+                    s
+                    for s in shifts
+                    if s.shift_id
+                    == assignment.shift_id
+                ),
+                None
+            )
+
+            if shift is None:
+                continue
+
+            my_shift_rows.append({
+                "Shift ID": shift.shift_id,
+                "Date": shift.date.strftime("%d/%m/%Y"),
+                "Start": shift.start_time.strftime("%H:%M"),
+                "End": shift.end_time.strftime("%H:%M")
+            })
+
+        st.dataframe(
+            my_shift_rows,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # ----------------------------------------------
+    # My staffing requests from SQLite
+    # ----------------------------------------------
+
+    st.divider()
+
     st.subheader("My Staffing Requests")
 
     my_requests = [
         request
-        for request in st.session_state.staffing_requests
-        if request.employee_id == selected_employee_id
+        for request in staffing_requests
+        if request.employee_id
+        == selected_employee_id
     ]
 
     if not my_requests:
-        st.info("You have no staffing requests.")
+
+        st.info(
+            "You have no staffing requests."
+        )
 
     else:
+
         request_rows = []
 
         for request in my_requests:
+
             request_rows.append({
                 "Request ID": request.request_id,
                 "Shift ID": request.shift_id,
-                "Status": request.status.value
+                "Status": request.status
             })
 
         st.dataframe(
@@ -429,10 +524,29 @@ else:
             hide_index=True
         )
 
-        st.subheader("Respond to Requests")
+        # ------------------------------------------
+        # Respond to requests
+        # ------------------------------------------
 
-        for request in my_requests:
-            if request.status == RequestStatus.PENDING:
+        pending_requests = [
+            request
+            for request in my_requests
+            if request.status == "pending"
+        ]
+
+        if pending_requests:
+
+            st.subheader("Respond to Requests")
+
+            st.info(
+                "Accept and Decline will be enabled "
+                "after database-safe request handling "
+                "is implemented."
+            )
+
+
+            for request in pending_requests:
+
                 st.write(
                     f"Request #{request.request_id} "
                     f"— Shift {request.shift_id}"
@@ -446,23 +560,46 @@ else:
                         "✅ Accept",
                         key=f"accept_{request.request_id}"
                     ):
-                        request.accept()
 
-                        apply_approved_request(
-                            request,
-                            st.session_state.availabilities
-                        )
+                        try:
+                            accept_and_assign_request(
+                                request.request_id
+                            )
 
-                        st.rerun()
+                        except ValueError as error:
+                            st.error(
+                                f"Cannot accept request: {error}"
+                            )
+
+                        else:
+                            st.success(
+                                "Request accepted! "
+                                "You have been assigned "
+                                "to the shift."
+                            )
+                            st.rerun()
 
 
                 with col_decline:
+
                     if st.button(
                         "❌ Decline",
                         key=f"decline_{request.request_id}"
                     ):
-                        request.decline()
-                        st.rerun()
 
+                        try:
+                            decline_staffing_request(
+                                request.request_id
+                            )
 
+                        except ValueError as error:
+                            st.error(
+                                f"Cannot decline request: {error}"
+                            )
+
+                        else:
+                            st.success(
+                                "Request declined successfully."
+                            )
+                            st.rerun()
 

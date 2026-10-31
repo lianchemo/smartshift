@@ -1,4 +1,4 @@
-
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text, inspect, event
@@ -16,7 +16,25 @@ from database.models import (
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SQLite database file
-DATABASE_PATH = BASE_DIR / "smartshift.db"
+
+# Select database using an environment variable.
+# By default, keep using the original database.
+database_filename = os.getenv(
+    "SMARTSHIFT_DB",
+    "smartshift.db"
+)
+
+# Allow only the two known local demo databases
+if database_filename not in {
+    "smartshift.db",
+    "smartshift_demo.db"
+}:
+    raise ValueError(
+        "Invalid SMARTSHIFT_DB value"
+    )
+
+DATABASE_PATH = BASE_DIR / database_filename
+
 
 # Create the database engine
 engine = create_engine(

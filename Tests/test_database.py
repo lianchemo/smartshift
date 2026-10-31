@@ -1,3 +1,5 @@
+from database.assignment_service import assign_accepted_request
+from database.models import AssignmentDB
 from database.models import StaffingRequestDB
 from database.request_service import approve_staffing_request
 from database.availability_repository import update_availability
@@ -352,6 +354,668 @@ def test_transaction_rolls_back_after_error():
         )
 
         assert saved_request.status == "pending"
+
+def test_accepted_request_creates_assignment():
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        session.add(
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        )
+
+        session.add(
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="available"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="accepted"
+            )
+        )
+
+        session.commit()
+
+    assign_accepted_request(
+        1,
+        db_engine=test_engine
+    )
+
+    with Session(test_engine) as session:
+        saved_assignment = session.scalar(
+            select(AssignmentDB).where(
+                AssignmentDB.employee_id == 107,
+                AssignmentDB.shift_id == 213
+            )
+        )
+
+        assert saved_assignment is not None
+
+def test_accepted_request_cannot_create_duplicate_assignment():
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    # Arrange: create an already assigned employee
+    with Session(test_engine) as session:
+        session.add(
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        )
+
+        session.add(
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="available"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="accepted"
+            )
+        )
+
+        # Roni is already assigned to this shift
+        session.add(
+            AssignmentDB(
+                employee_id=107,
+                shift_id=213
+            )
+        )
+
+        session.commit()
+
+    # Act: try to assign Roni again
+    with pytest.raises(
+        ValueError,
+        match="Employee is already assigned"
+    ):
+        assign_accepted_request(
+            1,
+            db_engine=test_engine
+        )
+
+    # Assert: only one assignment exists
+    with Session(test_engine) as session:
+        saved_assignments = session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.employee_id == 107,
+                AssignmentDB.shift_id == 213
+            )
+        ).all()
+
+        assert len(saved_assignments) == 1
+
+def test_accepted_request_cannot_fill_full_shift():
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        # Create employees
+        session.add_all([
+            EmployeeDB(
+                employee_id=101,
+                name="Dana",
+                max_shifts=5,
+                preferred_shifts=4
+            ),
+            EmployeeDB(
+                employee_id=102,
+                name="Noa",
+                max_shifts=5,
+                preferred_shifts=4
+            ),
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        ])
+
+        # Shift requires only two employees
+        session.add(
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        # The shift is already full
+        session.add_all([
+            AssignmentDB(
+                employee_id=101,
+                shift_id=213
+            ),
+            AssignmentDB(
+                employee_id=102,
+                shift_id=213
+            )
+        ])
+
+        # Roni is available and has accepted
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="available"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="accepted"
+            )
+        )
+
+        session.commit()
+
+    # Attempt to assign a third employee
+    with pytest.raises(
+        ValueError,
+        match="Shift is already fully staffed"
+    ):
+        assign_accepted_request(
+            1,
+            db_engine=test_engine
+        )
+
+    # The shift must still have exactly two employees
+    with Session(test_engine) as session:
+        saved_assignments = session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.shift_id == 213
+            )
+        ).all()
+
+        assert len(saved_assignments) == 2
+
+        assert all(
+            assignment.employee_id != 107
+            for assignment in saved_assignments
+        )
+
+def test_accepted_request_cannot_create_overlapping_shifts():
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        # Create employee
+        session.add(
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        )
+
+        # Existing shift: 08:00–16:00
+        session.add(
+            ShiftDB(
+                shift_id=211,
+                date=date(2026, 11, 6),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        # Requested shift: 14:00–22:00
+        session.add(
+            ShiftDB(
+                shift_id=215,
+                date=date(2026, 11, 6),
+                start_time=time(14, 0),
+                end_time=time(22, 0),
+                required_employees=2
+            )
+        )
+
+        # Roni is already assigned to shift 211
+        session.add(
+            AssignmentDB(
+                employee_id=107,
+                shift_id=211
+            )
+        )
+
+        # Roni is available for shift 215
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=215,
+                status="available"
+            )
+        )
+
+        # Accepted request for shift 215
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=215,
+                status="accepted"
+            )
+        )
+
+        session.commit()
+
+    # Attempt to assign overlapping shift
+    with pytest.raises(
+        ValueError,
+        match="Employee has an overlapping shift"
+    ):
+        assign_accepted_request(
+            1,
+            db_engine=test_engine
+        )
+
+    # Verify no new assignment was saved
+    with Session(test_engine) as session:
+        assignments = session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.employee_id == 107
+            )
+        ).all()
+
+        assert len(assignments) == 1
+        assert assignments[0].shift_id == 211
+
+def test_accepted_request_respects_max_shifts():
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        # Roni can work a maximum of 2 shifts
+        session.add(
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=2,
+                preferred_shifts=2
+            )
+        )
+
+        # Three non-overlapping shifts
+        session.add_all([
+            ShiftDB(
+                shift_id=211,
+                date=date(2026, 11, 5),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            ),
+            ShiftDB(
+                shift_id=212,
+                date=date(2026, 11, 6),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            ),
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        ])
+
+        # Roni already has two assignments
+        session.add_all([
+            AssignmentDB(
+                employee_id=107,
+                shift_id=211
+            ),
+            AssignmentDB(
+                employee_id=107,
+                shift_id=212
+            )
+        ])
+
+        # Roni accepted a third shift
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="available"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="accepted"
+            )
+        )
+
+        session.commit()
+
+    # Attempt to exceed the shift limit
+    with pytest.raises(
+        ValueError,
+        match="Employee reached maximum shifts"
+    ):
+        assign_accepted_request(
+            1,
+            db_engine=test_engine
+        )
+
+    # Verify only the original two assignments exist
+    with Session(test_engine) as session:
+        saved_assignments = session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.employee_id == 107
+            )
+        ).all()
+
+        assert len(saved_assignments) == 2
+
+        assert {
+            assignment.shift_id
+            for assignment in saved_assignments
+        } == {211, 212}
+
+def test_approval_and_assignment_should_be_atomic():
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        session.add(
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        )
+
+        session.add(
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="flexible"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="pending"
+            )
+        )
+
+        session.commit()
+
+    # Import the combined service we will implement next
+    from database.request_service import (
+        accept_and_assign_request
+    )
+
+    accept_and_assign_request(
+        1,
+        db_engine=test_engine
+    )
+
+    with Session(test_engine) as session:
+        request = session.get(StaffingRequestDB, 1)
+
+        availability = session.scalar(
+            select(AvailabilityDB).where(
+                AvailabilityDB.employee_id == 107,
+                AvailabilityDB.shift_id == 213
+            )
+        )
+
+        assignment = session.scalar(
+            select(AssignmentDB).where(
+                AssignmentDB.employee_id == 107,
+                AssignmentDB.shift_id == 213
+            )
+        )
+
+        assert request.status == "accepted"
+        assert availability.status == "available"
+        assert assignment is not None
+
+def test_accept_and_assign_keeps_data_unchanged_when_shift_full():
+    from database.request_service import accept_and_assign_request
+
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        session.add_all([
+            EmployeeDB(
+                employee_id=101,
+                name="Dana",
+                max_shifts=5,
+                preferred_shifts=4
+            ),
+            EmployeeDB(
+                employee_id=102,
+                name="Noa",
+                max_shifts=5,
+                preferred_shifts=4
+            ),
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        ])
+
+        session.add(
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        # The shift already has two employees
+        session.add_all([
+            AssignmentDB(
+                employee_id=101,
+                shift_id=213
+            ),
+            AssignmentDB(
+                employee_id=102,
+                shift_id=213
+            )
+        ])
+
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="flexible"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="pending"
+            )
+        )
+
+        session.commit()
+
+    # Trying to accept must fail
+    with pytest.raises(
+        ValueError,
+        match="Shift is already fully staffed"
+    ):
+        accept_and_assign_request(
+            1,
+            db_engine=test_engine
+        )
+
+    # Verify nothing was changed
+    with Session(test_engine) as session:
+        request = session.get(StaffingRequestDB, 1)
+
+        availability = session.scalar(
+            select(AvailabilityDB).where(
+                AvailabilityDB.employee_id == 107,
+                AvailabilityDB.shift_id == 213
+            )
+        )
+
+        assignments = session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.shift_id == 213
+            )
+        ).all()
+
+        assert request.status == "pending"
+        assert availability.status == "flexible"
+        assert len(assignments) == 2
+
+        assert 107 not in {
+            assignment.employee_id
+            for assignment in assignments
+        }
+
+def test_decline_request_keeps_availability_and_assignments():
+    from database.request_service import decline_staffing_request
+
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        session.add(
+            EmployeeDB(
+                employee_id=107,
+                name="Roni",
+                max_shifts=5,
+                preferred_shifts=4
+            )
+        )
+
+        session.add(
+            ShiftDB(
+                shift_id=213,
+                date=date(2026, 11, 7),
+                start_time=time(8, 0),
+                end_time=time(16, 0),
+                required_employees=2
+            )
+        )
+
+        session.add(
+            AvailabilityDB(
+                employee_id=107,
+                shift_id=213,
+                status="flexible"
+            )
+        )
+
+        session.add(
+            StaffingRequestDB(
+                request_id=1,
+                employee_id=107,
+                shift_id=213,
+                status="pending"
+            )
+        )
+
+        session.commit()
+
+    decline_staffing_request(1, db_engine=test_engine)
+
+    with Session(test_engine) as session:
+        request = session.get(StaffingRequestDB, 1)
+
+        availability = session.scalar(
+            select(AvailabilityDB).where(
+                AvailabilityDB.employee_id == 107,
+                AvailabilityDB.shift_id == 213
+            )
+        )
+
+        assignments = session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.employee_id == 107,
+                AssignmentDB.shift_id == 213
+            )
+        ).all()
+
+        assert request.status == "declined"
+        assert availability.status == "flexible"
+        assert len(assignments) == 0
+
+
+
+
+
 
 
 

@@ -15,7 +15,8 @@ from database.weekly_shift_service import create_weekly_shifts
 from datetime import date, timedelta
 from database.weekly_schedule_service import (
     generate_weekly_schedule_preview,
-    approve_weekly_schedule
+    approve_weekly_schedule,
+    get_weekly_schedule_fingerprint
 )
 from database.request_service import (
     accept_and_assign_request,
@@ -700,6 +701,11 @@ if view == "Manager Dashboard":
                 )
             )
             st.session_state.preview_week_start = week_start
+            st.session_state.preview_fingerprint = (
+                get_weekly_schedule_fingerprint(
+                    week_start=week_start
+                )
+            )
 
     # Show preview only for the selected week
     if (
@@ -985,7 +991,10 @@ if view == "Manager Dashboard":
             try:
                 saved_count = approve_weekly_schedule(
                     week_start=week_start,
-                    expected_new_assignments=proposed_assignments
+                    expected_new_assignments=proposed_assignments,
+                    expected_fingerprint=st.session_state.get(
+                        "preview_fingerprint"
+                    )
                 )
 
             except ValueError as error:

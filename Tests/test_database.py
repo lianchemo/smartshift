@@ -1915,7 +1915,7 @@ def test_weekly_schedule_approval_and_publication():
             db_engine=test_engine
         )
 
-def test_approval_saves_exact_preview_with_multiple_valid_schedules():
+def test_approval_saves_exact_preview_with_multiple_valid_schedules(monkeypatch):
     from database.weekly_schedule_service import (
         generate_weekly_schedule_preview,
         approve_weekly_schedule
@@ -1986,6 +1986,35 @@ def test_approval_saves_exact_preview_with_multiple_valid_schedules():
     # Both shifts must be staffed.
     assert len(preview_pairs) == 2
 
+    # Simulate OR-Tools choosing the other equally valid
+    # optimal schedule during the approval calculation.
+    from assignment import Assignment
+    import database.weekly_schedule_service as weekly_service
+
+    alternative_pairs = {
+        (901, 801),
+        (902, 802)
+    }
+
+    if preview_pairs == alternative_pairs:
+        alternative_pairs = {
+            (901, 802),
+            (902, 801)
+        }
+
+    def alternative_optimizer(*args, **kwargs):
+        return [
+            Assignment(employee_id, shift_id)
+            for employee_id, shift_id in sorted(alternative_pairs)
+        ]
+
+    monkeypatch.setattr(
+        weekly_service,
+        "optimize_schedule",
+        alternative_optimizer
+    )
+
+
     # Approve the exact preview.
     saved_count = approve_weekly_schedule(
         week_start=week_start,
@@ -2015,6 +2044,92 @@ def test_approval_saves_exact_preview_with_multiple_valid_schedules():
 
         assert weekly_schedule is not None
         assert weekly_schedule.status == "approved"
+
+def test_approval_rejects_changed_fingerprint():
+    import pytest
+
+    from database.weekly_schedule_service import (
+        generate_weekly_schedule_preview,
+        get_weekly_schedule_fingerprint,
+        approve_weekly_schedule
+    )
+    from database.models import (
+        EmployeeDB,
+        ShiftDB,
+        AvailabilityDB,
+        AssignmentDB
+    )
+
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    week_start = date(2026, 11, 8)
+
+    with Session(test_engine) as session:
+        with session.begin():
+            session.add(
+                EmployeeDB(
+                    employee_id=999,
+                    name="Test Employee",
+                    max_shifts=3,
+                    preferred_shifts=2
+                )
+            )
+
+            session.add(
+                ShiftDB(
+                    shift_id=901,
+                    date=week_start,
+                    start_time=time(8, 0),
+                    end_time=time(16, 0),
+                    required_employees=1
+                )
+            )
+
+            session.add(
+                AvailabilityDB(
+                    employee_id=999,
+                    shift_id=901,
+                    status="available"
+                )
+            )
+
+    preview = generate_weekly_schedule_preview(
+        week_start=week_start,
+        db_engine=test_engine
+    )
+
+    original_fingerprint = get_weekly_schedule_fingerprint(
+        week_start=week_start,
+        db_engine=test_engine
+    )
+
+    assert len(preview) == 1
+
+    # Change employee preferences after preview.
+    with Session(test_engine) as session:
+        with session.begin():
+            employee = session.get(EmployeeDB, 999)
+            employee.preferred_shifts = 1
+
+    # Approval must reject the outdated preview.
+    with pytest.raises(
+        ValueError,
+        match="Schedule data has changed"
+    ):
+        approve_weekly_schedule(
+            week_start=week_start,
+            expected_new_assignments=preview,
+            db_engine=test_engine,
+            expected_fingerprint=original_fingerprint
+        )
+
+    # Nothing should have been saved.
+    with Session(test_engine) as session:
+        assert session.scalars(
+            select(AssignmentDB)
+        ).all() == []
+
 
 
 

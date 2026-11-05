@@ -1,4 +1,5 @@
-
+import hashlib
+import json
 from datetime import date, timedelta
 
 from sqlalchemy import select
@@ -21,7 +22,107 @@ from database.converters import (
 )
 
 from optimizer import optimize_schedule
+from validation import validate_schedule
 
+
+def get_weekly_schedule_fingerprint(
+    week_start,
+    db_engine=None,
+    session=None
+):
+    current_engine = db_engine if db_engine is not None else engine
+
+    def calculate(current_session):
+        week_end = week_start + timedelta(days=7)
+
+        employees = current_session.scalars(
+            select(EmployeeDB)
+        ).all()
+
+        shifts = current_session.scalars(
+            select(ShiftDB).where(
+                ShiftDB.date >= week_start,
+                ShiftDB.date < week_end
+            )
+        ).all()
+
+        shift_ids = [shift.shift_id for shift in shifts]
+
+        availabilities = current_session.scalars(
+            select(AvailabilityDB).where(
+                AvailabilityDB.shift_id.in_(shift_ids)
+            )
+        ).all()
+
+        assignments = current_session.scalars(
+            select(AssignmentDB).where(
+                AssignmentDB.shift_id.in_(shift_ids)
+            )
+        ).all()
+
+        weekly_schedule = current_session.get(
+            WeeklyScheduleDB,
+            week_start
+        )
+
+        data = {
+            "week_start": week_start.isoformat(),
+            "employees": sorted([
+                (
+                    e.employee_id,
+                    e.name,
+                    e.max_shifts,
+                    e.preferred_shifts
+                )
+                for e in employees
+            ]),
+            "shifts": sorted([
+                (
+                    s.shift_id,
+                    str(s.date),
+                    str(s.start_time),
+                    str(s.end_time),
+                    s.required_employees
+                )
+                for s in shifts
+            ]),
+            "availabilities": sorted([
+                (
+                    a.employee_id,
+                    a.shift_id,
+                    str(a.status)
+                )
+                for a in availabilities
+            ]),
+            "assignments": sorted([
+                (
+                    a.employee_id,
+                    a.shift_id
+                )
+                for a in assignments
+            ]),
+            "schedule_status": (
+                weekly_schedule.status
+                if weekly_schedule is not None
+                else "draft"
+            )
+        }
+
+        serialized = json.dumps(
+            data,
+            sort_keys=True,
+            ensure_ascii=False
+        )
+
+        return hashlib.sha256(
+            serialized.encode("utf-8")
+        ).hexdigest()
+
+    if session is not None:
+        return calculate(session)
+
+    with Session(current_engine) as current_session:
+        return calculate(current_session)
 
 def generate_weekly_schedule_preview(
     week_start=None,
@@ -101,7 +202,8 @@ def generate_weekly_schedule_preview(
 def approve_weekly_schedule(
     week_start,
     expected_new_assignments,
-    db_engine=None
+    db_engine=None,
+    expected_fingerprint=None
 ):
     from sqlalchemy import select
     from sqlalchemy.orm import Session
@@ -131,6 +233,19 @@ def approve_weekly_schedule(
 
     with Session(current_engine) as session:
         with session.begin():
+            if expected_fingerprint is not None:
+                current_fingerprint = (
+                    get_weekly_schedule_fingerprint(
+                        week_start,
+                        session=session
+                    )
+                )
+
+                if current_fingerprint != expected_fingerprint:
+                    raise ValueError(
+                        "Schedule data has changed. "
+                        "Generate a new preview before approving."
+                    )
             # Do not modify an already published schedule.
             weekly_schedule = session.get(
                 WeeklyScheduleDB,
@@ -219,13 +334,94 @@ def approve_weekly_schedule(
                 for assignment in fresh_new_assignments
             }
 
-            if fresh_pairs != expected_pairs:
+
+            # Validate the exact assignments shown to the manager.
+            employee_ids = {
+                employee.employee_id for employee in employees
+            }
+            shift_id_set = {
+                shift.shift_id for shift in shifts
+            }
+
+            if any(
+                employee_id not in employee_ids
+                or shift_id not in shift_id_set
+                for employee_id, shift_id in expected_pairs
+            ):
                 raise ValueError(
                     "Schedule has changed. "
                     "Generate a new preview before approving."
                 )
 
-            for assignment in fresh_new_assignments:
+            from assignment import Assignment
+
+            proposed_assignments = existing_assignments + [
+                Assignment(employee_id, shift_id)
+                for employee_id, shift_id in sorted(expected_pairs)
+            ]
+
+            validation_errors = validate_schedule(
+                employees,
+                shifts,
+                availabilities,
+                proposed_assignments
+            )
+
+            if validation_errors:
+                raise ValueError(
+                    "Schedule has changed. "
+                    "Generate a new preview before approving."
+                )
+
+            # Compare quality, not the identity of assignments.
+            def schedule_quality(schedule):
+                counts = {
+                    employee.employee_id: 0
+                    for employee in employees
+                }
+
+                for assignment in schedule:
+                    counts[assignment.employee_id] += 1
+
+                preference_deviation = sum(
+                    abs(
+                        counts[employee.employee_id]
+                        - employee.preferred_shifts
+                    )
+                    for employee in employees
+                )
+
+                loads = list(counts.values())
+                fairness_gap = (
+                    max(loads) - min(loads)
+                    if loads else 0
+                )
+
+                preference_weight = len(shifts) + 1
+
+                return (
+                    len(schedule),
+                    -(
+                        preference_weight * preference_deviation
+                        + fairness_gap
+                    )
+                )
+
+            if (
+                schedule_quality(proposed_assignments)
+                < schedule_quality(fresh_preview)
+            ):
+                raise ValueError(
+                    "Schedule has changed. "
+                    "Generate a new preview before approving."
+                )
+
+            for assignment in proposed_assignments:
+                if (
+                        assignment.employee_id,
+                        assignment.shift_id
+                ) in saved_pairs:
+                    continue
                 session.add(
                     AssignmentDB(
                         employee_id=assignment.employee_id,
@@ -243,5 +439,5 @@ def approve_weekly_schedule(
             else:
                 weekly_schedule.status = "approved"
 
-    return len(fresh_new_assignments)
+    return len(expected_pairs)
 

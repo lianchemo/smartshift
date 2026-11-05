@@ -79,12 +79,31 @@ def generate_schedule(
             if assignment.shift_id == shift.shift_id
         )
 
+
+        # Count how many shifts each employee is available for
+        availability_counts = {
+            employee.employee_id: sum(
+                1
+                for s in shifts
+                if availability_lookup.get(
+                    (employee.employee_id, s.shift_id)
+                ) == AvailabilityStatus.AVAILABLE
+            )
+            for employee in employees
+        }
+
+        # Prefer employees with fewer assignments.
+        # When tied, prefer employees with fewer options.
         employees_by_fairness = sorted(
             employees,
-            key=lambda employee: shift_counts[employee.employee_id]
+            key=lambda employee: (
+                shift_counts[employee.employee_id],
+                availability_counts[employee.employee_id]
+            )
         )
 
         for employee in employees_by_fairness:
+
             if assigned_count >= shift.required_employees:
                 break
 

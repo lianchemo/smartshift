@@ -343,6 +343,117 @@ def test_schedule_distributes_shifts_fairly():
     # one shift above another employee.
     assert max(counts.values()) - min(counts.values()) <= 1
 
+def test_schedule_maximizes_staffed_positions():
+    from datetime import date, time
+
+    from employee import Employee
+    from shift import Shift
+    from availability import Availability, AvailabilityStatus
+    from validation import validate_schedule
+
+    employees = [
+        Employee(101, "Dana", 1, 1),
+        Employee(102, "Noa", 1, 1),
+        Employee(103, "Roni", 1, 1),
+    ]
+
+    shifts = [
+        Shift(
+            shift_id=301,
+            shift_date=date(2026, 11, 8),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=2
+        ),
+        Shift(
+            shift_id=302,
+            shift_date=date(2026, 11, 9),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=1
+        )
+    ]
+
+    availabilities = [
+        Availability(101, 301, AvailabilityStatus.AVAILABLE),
+        Availability(101, 302, AvailabilityStatus.AVAILABLE),
+        Availability(102, 301, AvailabilityStatus.AVAILABLE),
+        Availability(102, 302, AvailabilityStatus.UNAVAILABLE),
+        Availability(103, 301, AvailabilityStatus.AVAILABLE),
+        Availability(103, 302, AvailabilityStatus.UNAVAILABLE),
+    ]
+
+    assignments = generate_schedule(
+        employees, shifts, availabilities
+    )
+
+    assignment_pairs = {
+        (a.employee_id, a.shift_id)
+        for a in assignments
+    }
+
+    assert len(assignments) == 3
+    assert (101, 302) in assignment_pairs
+
+    assert validate_schedule(
+        employees, shifts, availabilities, assignments
+    ) == []
+
+def test_schedule_maximizes_coverage_across_multiple_shifts():
+    from datetime import date, time
+
+    from employee import Employee
+    from shift import Shift
+    from availability import Availability, AvailabilityStatus
+    from validation import validate_schedule
+
+    employees = [
+        Employee(101, "Dana", 1, 1),
+        Employee(102, "Noa", 1, 1),
+        Employee(103, "Roni", 1, 1),
+    ]
+
+    shifts = [
+        Shift(
+            shift_id=301 + i,
+            shift_date=date(2026, 11, 8 + i),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=1
+        )
+        for i in range(3)
+    ]
+
+    availabilities = [
+        Availability(101, 301, AvailabilityStatus.AVAILABLE),
+        Availability(101, 302, AvailabilityStatus.AVAILABLE),
+        Availability(101, 303, AvailabilityStatus.AVAILABLE),
+
+        Availability(102, 301, AvailabilityStatus.AVAILABLE),
+        Availability(102, 302, AvailabilityStatus.UNAVAILABLE),
+        Availability(102, 303, AvailabilityStatus.UNAVAILABLE),
+
+        Availability(103, 301, AvailabilityStatus.UNAVAILABLE),
+        Availability(103, 302, AvailabilityStatus.AVAILABLE),
+        Availability(103, 303, AvailabilityStatus.AVAILABLE),
+    ]
+
+    assignments = generate_schedule(
+        employees, shifts, availabilities
+    )
+
+    assert len(assignments) == 3
+
+    assert validate_schedule(
+        employees, shifts, availabilities, assignments
+    ) == []
+
+    assert {
+        assignment.shift_id
+        for assignment in assignments
+    } == {301, 302, 303}
+
+
 
 
 

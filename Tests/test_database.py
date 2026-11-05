@@ -1915,6 +1915,108 @@ def test_weekly_schedule_approval_and_publication():
             db_engine=test_engine
         )
 
+def test_approval_saves_exact_preview_with_multiple_valid_schedules():
+    from database.weekly_schedule_service import (
+        generate_weekly_schedule_preview,
+        approve_weekly_schedule
+    )
+    from database.models import (
+        EmployeeDB,
+        ShiftDB,
+        AvailabilityDB,
+        AssignmentDB,
+        WeeklyScheduleDB
+    )
+
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+
+    week_start = date(2026, 11, 8)
+
+    with Session(test_engine) as session:
+        with session.begin():
+            # Two employees can work either shift.
+            for employee_id, name in [
+                (901, "Dana"),
+                (902, "Noa")
+            ]:
+                session.add(
+                    EmployeeDB(
+                        employee_id=employee_id,
+                        name=name,
+                        max_shifts=1,
+                        preferred_shifts=1
+                    )
+                )
+
+            for shift_id, shift_date in [
+                (801, date(2026, 11, 8)),
+                (802, date(2026, 11, 9))
+            ]:
+                session.add(
+                    ShiftDB(
+                        shift_id=shift_id,
+                        date=shift_date,
+                        start_time=time(8, 0),
+                        end_time=time(16, 0),
+                        required_employees=1
+                    )
+                )
+
+                for employee_id in (901, 902):
+                    session.add(
+                        AvailabilityDB(
+                            employee_id=employee_id,
+                            shift_id=shift_id,
+                            status="available"
+                        )
+                    )
+
+    # Generate the schedule shown to the manager.
+    preview = generate_weekly_schedule_preview(
+        week_start=week_start,
+        db_engine=test_engine
+    )
+
+    preview_pairs = {
+        (a.employee_id, a.shift_id)
+        for a in preview
+    }
+
+    # Both shifts must be staffed.
+    assert len(preview_pairs) == 2
+
+    # Approve the exact preview.
+    saved_count = approve_weekly_schedule(
+        week_start=week_start,
+        expected_new_assignments=preview,
+        db_engine=test_engine
+    )
+
+    assert saved_count == 2
+
+    # Check what was actually saved.
+    with Session(test_engine) as session:
+        saved_rows = session.scalars(
+            select(AssignmentDB)
+        ).all()
+
+        saved_pairs = {
+            (row.employee_id, row.shift_id)
+            for row in saved_rows
+        }
+
+        assert saved_pairs == preview_pairs
+
+        weekly_schedule = session.get(
+            WeeklyScheduleDB,
+            week_start
+        )
+
+        assert weekly_schedule is not None
+        assert weekly_schedule.status == "approved"
+
+
 
 
 

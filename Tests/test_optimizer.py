@@ -275,6 +275,54 @@ def test_optimizer_respects_preferred_shift_counts():
         employees, shifts, availabilities, assignments
     ) == []
 
+def test_optimizer_returns_consistent_assignments():
+    employees = [
+        Employee(101, "Dana", 2, 2),
+        Employee(102, "Noa", 2, 2),
+        Employee(103, "Roni", 2, 2),
+    ]
+
+    shifts = [
+        Shift(
+            shift_id=701 + i,
+            shift_date=date(2026, 11, 8 + i),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=1
+        )
+        for i in range(3)
+    ]
+
+    availabilities = [
+        Availability(
+            employee.employee_id,
+            shift.shift_id,
+            AvailabilityStatus.AVAILABLE
+        )
+        for employee in employees
+        for shift in shifts
+    ]
+
+    first_result = optimize_schedule(
+        employees, shifts, availabilities
+    )
+
+    second_result = optimize_schedule(
+        employees, shifts, availabilities
+    )
+
+    first_pairs = {
+        (a.employee_id, a.shift_id)
+        for a in first_result
+    }
+
+    second_pairs = {
+        (a.employee_id, a.shift_id)
+        for a in second_result
+    }
+
+    assert first_pairs == second_pairs
+
 
 
 

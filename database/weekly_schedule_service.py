@@ -20,7 +20,7 @@ from database.converters import (
     assignment_from_db
 )
 
-from scheduler import generate_schedule
+from optimizer import optimize_schedule
 
 
 def generate_weekly_schedule_preview(
@@ -89,7 +89,7 @@ def generate_weekly_schedule_preview(
             for row in assignment_rows
         ]
 
-    preview = generate_schedule(
+    preview = optimize_schedule(
         employees,
         shifts,
         availabilities,
@@ -198,7 +198,7 @@ def approve_weekly_schedule(
                 for assignment in existing_assignments
             }
 
-            fresh_preview = generate_schedule(
+            fresh_preview = optimize_schedule(
                 employees,
                 shifts,
                 availabilities,

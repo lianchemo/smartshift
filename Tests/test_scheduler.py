@@ -203,6 +203,148 @@ def test_existing_assignments_are_preserved():
         (101, 201)
     }
 
+def test_greedy_can_miss_full_schedule():
+    from datetime import date, time
+
+    from employee import Employee
+    from shift import Shift
+    from availability import (
+        Availability,
+        AvailabilityStatus
+    )
+    from scheduler import generate_schedule
+
+    employees = [
+        Employee(
+            employee_id=101,
+            name="Dana",
+            max_shifts=1,
+            preferred_shifts=1
+        ),
+        Employee(
+            employee_id=102,
+            name="Noa",
+            max_shifts=1,
+            preferred_shifts=1
+        )
+    ]
+
+    shifts = [
+        Shift(
+            shift_id=201,
+            shift_date=date(2026, 11, 8),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=1
+        ),
+        Shift(
+            shift_id=202,
+            shift_date=date(2026, 11, 9),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=1
+        )
+    ]
+
+    availabilities = [
+        Availability(
+            employee_id=101,
+            shift_id=201,
+            status=AvailabilityStatus.AVAILABLE
+        ),
+        Availability(
+            employee_id=101,
+            shift_id=202,
+            status=AvailabilityStatus.AVAILABLE
+        ),
+        Availability(
+            employee_id=102,
+            shift_id=201,
+            status=AvailabilityStatus.AVAILABLE
+        ),
+        Availability(
+            employee_id=102,
+            shift_id=202,
+            status=AvailabilityStatus.UNAVAILABLE
+        )
+    ]
+
+    schedule = generate_schedule(
+        employees,
+        shifts,
+        availabilities
+    )
+
+    assigned_pairs = {
+        (assignment.employee_id, assignment.shift_id)
+        for assignment in schedule
+    }
+
+    # A full schedule is possible:
+    # Noa -> Sunday, Dana -> Monday.
+    optimal_pairs = {
+        (102, 201),
+        (101, 202)
+    }
+
+    assert assigned_pairs == optimal_pairs
+
+def test_schedule_distributes_shifts_fairly():
+    from datetime import date, time
+
+    from employee import Employee
+    from shift import Shift
+    from availability import Availability, AvailabilityStatus
+
+    employees = [
+        Employee(101, "Dana", 4, 4),
+        Employee(102, "Noa", 4, 4),
+        Employee(103, "Roni", 4, 4),
+    ]
+
+    shifts = [
+        Shift(
+            shift_id=201 + i,
+            shift_date=date(2026, 11, 8 + i),
+            start_time=time(8, 0),
+            end_time=time(16, 0),
+            required_employees=1
+        )
+        for i in range(4)
+    ]
+
+    availabilities = [
+        Availability(
+            employee_id=employee.employee_id,
+            shift_id=shift.shift_id,
+            status=AvailabilityStatus.AVAILABLE
+        )
+        for employee in employees
+        for shift in shifts
+    ]
+
+    assignments = generate_schedule(
+        employees, shifts, availabilities
+    )
+
+    counts = {
+        employee.employee_id: sum(
+            1
+            for assignment in assignments
+            if assignment.employee_id == employee.employee_id
+        )
+        for employee in employees
+    }
+
+    # All four shifts must be staffed.
+    assert len(assignments) == 4
+
+    # No employee should receive more than
+    # one shift above another employee.
+    assert max(counts.values()) - min(counts.values()) <= 1
+
+
+
 
 
 

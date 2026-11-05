@@ -1,9 +1,11 @@
 from datetime import date, time
 from sqlalchemy import (
+    Column,
     Integer,
     String,
     Date,
     Time,
+    DateTime,
     ForeignKey,
     UniqueConstraint
 )
@@ -148,5 +150,39 @@ class StaffingRequestDB(Base):
         nullable=False,
         default="pending"
     )
+
+
+class WeeklyDeadlineDB(Base):
+    __tablename__ = "weekly_deadlines"
+
+    week_start = Column(
+        Date,
+        primary_key=True
+    )
+
+    deadline_at = Column(
+        DateTime,
+        nullable=False
+    )
+
+class WeeklyScheduleDB(Base):
+    __tablename__ = "weekly_schedules"
+
+    week_start = Column(
+        Date,
+        primary_key=True
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="draft"
+    )
+
+    published_at = Column(
+        DateTime,
+        nullable=True
+    )
+
 
 

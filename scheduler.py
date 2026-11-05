@@ -33,7 +33,45 @@ def generate_schedule(
         for shift in shifts
     }
 
-    for shift in shifts:
+
+    # ----------------------------------------------
+    # Prioritize the hardest shifts to staff
+    # ----------------------------------------------
+
+    def staffing_difficulty(shift):
+        available_count = sum(
+            1
+            for employee in employees
+            if availability_lookup.get(
+                (employee.employee_id, shift.shift_id)
+            ) == AvailabilityStatus.AVAILABLE
+        )
+
+        already_assigned_count = sum(
+            1
+            for assignment in assignments
+            if assignment.shift_id == shift.shift_id
+        )
+
+        missing_count = max(
+            0,
+            shift.required_employees - already_assigned_count
+        )
+
+        # A shift with fewer available employees
+        # per missing position is more difficult.
+        if missing_count == 0:
+            return float("inf")
+
+        return available_count / missing_count
+
+    prioritized_shifts = sorted(
+        shifts,
+        key=staffing_difficulty
+    )
+
+    for shift in prioritized_shifts:
+
         # Count employees already assigned to this shift
         assigned_count = sum(
             1
@@ -41,7 +79,12 @@ def generate_schedule(
             if assignment.shift_id == shift.shift_id
         )
 
-        for employee in employees:
+        employees_by_fairness = sorted(
+            employees,
+            key=lambda employee: shift_counts[employee.employee_id]
+        )
+
+        for employee in employees_by_fairness:
             if assigned_count >= shift.required_employees:
                 break
 

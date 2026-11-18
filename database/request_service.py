@@ -1,4 +1,4 @@
-
+from datetime import timedelta
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
@@ -133,11 +133,26 @@ def accept_and_assign_request(request_id, db_engine=None):
                     "Shift is already fully staffed"
                 )
 
-            # 6. Check employee shift limit
+
+            # 6. Check employee shift limit for this week only
+
+            # SmartShift weeks start on Sunday.
+            days_since_sunday = (shift.date.weekday() + 1) % 7
+            week_start = shift.date - timedelta(
+                days=days_since_sunday
+            )
+            week_end = week_start + timedelta(days=7)
+
             employee_assignments = session.scalars(
-                select(AssignmentDB).where(
-                    AssignmentDB.employee_id
-                    == employee.employee_id
+                select(AssignmentDB)
+                .join(
+                    ShiftDB,
+                    AssignmentDB.shift_id == ShiftDB.shift_id
+                )
+                .where(
+                    AssignmentDB.employee_id == employee.employee_id,
+                    ShiftDB.date >= week_start,
+                    ShiftDB.date < week_end
                 )
             ).all()
 
@@ -145,6 +160,7 @@ def accept_and_assign_request(request_id, db_engine=None):
                 raise ValueError(
                     "Employee reached maximum shifts"
                 )
+
 
             # 7. Check overlapping shifts
             for assignment in employee_assignments:

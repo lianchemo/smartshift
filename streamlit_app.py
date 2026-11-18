@@ -1146,8 +1146,20 @@ if view == "Manager Dashboard":
     st.divider()
 
     st.subheader("Staffing Recommendations")
+    # Calculate gaps for the selected week,
+    # including saved and proposed assignments.
+    weekly_shifts = [
+        shift
+        for shift in shifts
+        if week_start <= shift.date < week_start + timedelta(days=7)
+    ]
 
-    if not gaps:
+    weekly_gaps = find_staffing_gaps(
+        weekly_shifts,
+        preview
+    )
+
+    if not weekly_gaps:
 
         st.success(
             "All shifts are fully staffed!"
@@ -1155,7 +1167,7 @@ if view == "Manager Dashboard":
 
     else:
 
-        for gap in gaps:
+        for gap in weekly_gaps:
 
             shift = next(
                 s
@@ -1180,13 +1192,13 @@ if view == "Manager Dashboard":
             eligible = filter_eligible_employees(
                 shift,
                 flexible,
-                shifts,
-                assignments
+                weekly_shifts,
+                preview
             )
 
             ranked = rank_eligible_employees(
                 eligible,
-                assignments
+                preview
             )
 
             if not ranked:
@@ -1200,10 +1212,9 @@ if view == "Manager Dashboard":
                 recommendation_rows = []
 
                 for employee in ranked:
-
                     current_shifts = sum(
                         1
-                        for assignment in assignments
+                        for assignment in preview
                         if assignment.employee_id
                         == employee.employee_id
                     )
@@ -1301,7 +1312,18 @@ if view == "Manager Dashboard":
 
     st.subheader("Staffing Requests")
 
-    if not staffing_requests:
+    weekly_shift_ids = {
+        shift.shift_id
+        for shift in weekly_shifts
+    }
+
+    weekly_staffing_requests = [
+        request
+        for request in staffing_requests
+        if request.shift_id in weekly_shift_ids
+    ]
+
+    if not weekly_staffing_requests:
 
         st.info(
             "No staffing requests yet."
@@ -1311,7 +1333,7 @@ if view == "Manager Dashboard":
 
         request_rows = []
 
-        for request in staffing_requests:
+        for request in weekly_staffing_requests:
 
             request_rows.append({
                 "Request ID": request.request_id,

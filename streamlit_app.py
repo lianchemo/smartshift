@@ -190,6 +190,30 @@ if st.user.is_logged_in:
 
     user_role = "manager"
     active_engine = None  # Authorized local manager uses the existing DB.
+
+    from sqlalchemy import inspect
+    from database.db import engine as secure_engine
+
+    required_tables = {
+        "employees",
+        "shifts",
+        "availabilities",
+        "assignments",
+        "staffing_requests",
+        "weekly_deadlines",
+        "weekly_schedules",
+    }
+
+    if not required_tables.issubset(
+        set(inspect(secure_engine).get_table_names())
+    ):
+        st.warning(
+            "🔐 Secure Mode is not configured on this deployment. "
+            "Please log out and explore Manager Demo or Employee Demo."
+        )
+        st.button("🚪 Log out", on_click=st.logout)
+        st.stop()
+
     st.sidebar.button("🚪 Log out", on_click=st.logout)
 
 else:

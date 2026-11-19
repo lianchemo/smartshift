@@ -267,8 +267,18 @@ else:
         )
         st.divider()
         st.subheader("Authorized Access")
-        if st.button("🔐 Sign in with Google", use_container_width=True):
-            st.login()
+
+        # Google login is available during local development only.
+        # The public deployment exposes isolated demo sessions.
+        import os
+
+        if st.secrets.get("app", {}).get("show_google_login", False):
+            if st.button(
+                "🔐 Sign in with Google",
+                use_container_width=True
+            ):
+                st.login()
+
         st.stop()
 
     # Fail closed: never fall back to the shared database in demo mode.

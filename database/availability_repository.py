@@ -6,10 +6,13 @@ from database.db import engine
 from database.models import AvailabilityDB
 
 
-def add_availabilities(availabilities):
-    added_count = 0
 
-    with Session(engine) as session:
+def add_availabilities(availabilities, db_engine=None):
+    added_count = 0
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         for availability in availabilities:
             statement = select(AvailabilityDB).where(
                 AvailabilityDB.employee_id == availability.employee_id,
@@ -35,8 +38,12 @@ def add_availabilities(availabilities):
     print(f"Added {added_count} availability records.")
 
 
-def get_all_availabilities():
-    with Session(engine) as session:
+
+def get_all_availabilities(db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         statement = select(AvailabilityDB).order_by(
             AvailabilityDB.employee_id,
             AvailabilityDB.shift_id

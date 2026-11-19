@@ -1,12 +1,21 @@
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database.db import engine
 from database.models import EmployeeDB
 
 
-def add_employee(employee_id, name, max_shifts, preferred_shifts):
-    with Session(engine) as session:
+def add_employee(
+    employee_id,
+    name,
+    max_shifts,
+    preferred_shifts,
+    db_engine=None
+):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
         existing_employee = session.get(EmployeeDB, employee_id)
 
         if existing_employee is not None:
@@ -26,26 +35,28 @@ def add_employee(employee_id, name, max_shifts, preferred_shifts):
         print(f"Employee {name} saved successfully!")
 
 
-def get_employee(employee_id):
-    with Session(engine) as session:
+def get_employee(employee_id, db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
         return session.get(EmployeeDB, employee_id)
 
 
-
-def add_employees(employees):
+def add_employees(employees, db_engine=None):
     for employee in employees:
         add_employee(
             employee.employee_id,
             employee.name,
             employee.max_shifts,
-            employee.preferred_shifts
+            employee.preferred_shifts,
+            db_engine=db_engine
         )
 
 
-def get_all_employees():
-    from sqlalchemy import select
+def get_all_employees(db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
 
-    with Session(engine) as session:
+    with Session(active_engine) as session:
         statement = select(EmployeeDB).order_by(
             EmployeeDB.employee_id
         )
@@ -57,7 +68,6 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
 
-    # Allow importing sample_data from the project root
     project_root = Path(__file__).resolve().parent.parent
     sys.path.insert(0, str(project_root))
 

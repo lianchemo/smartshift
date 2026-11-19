@@ -6,8 +6,12 @@ from database.db import engine
 from database.models import StaffingRequestDB
 
 
-def add_staffing_request(employee_id, shift_id):
-    with Session(engine) as session:
+
+def add_staffing_request(employee_id, shift_id, db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         # Prevent multiple pending requests for the same employee and shift
         statement = select(StaffingRequestDB).where(
             StaffingRequestDB.employee_id == employee_id,
@@ -36,21 +40,29 @@ def add_staffing_request(employee_id, shift_id):
         return request_id
 
 
-def get_all_staffing_requests():
-    with Session(engine) as session:
+
+def get_all_staffing_requests(db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         statement = select(StaffingRequestDB).order_by(
             StaffingRequestDB.request_id
         )
 
         return session.scalars(statement).all()
 
-def update_request_status(request_id, new_status):
+def update_request_status(request_id, new_status, db_engine=None):
     valid_statuses = {"accepted", "declined"}
 
     if new_status not in valid_statuses:
         raise ValueError("Invalid request status")
 
-    with Session(engine) as session:
+
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         request = session.get(StaffingRequestDB, request_id)
 
         if request is None:

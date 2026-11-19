@@ -6,10 +6,11 @@ from database.db import engine
 from database.models import AssignmentDB
 
 
-def add_assignments(assignments):
+def add_assignments(assignments, db_engine=None):
     added_count = 0
+    active_engine = db_engine if db_engine is not None else engine
 
-    with Session(engine) as session:
+    with Session(active_engine) as session:
         for assignment in assignments:
             statement = select(AssignmentDB).where(
                 AssignmentDB.employee_id == assignment.employee_id,
@@ -34,8 +35,10 @@ def add_assignments(assignments):
     print(f"Added {added_count} assignments.")
 
 
-def get_all_assignments():
-    with Session(engine) as session:
+def get_all_assignments(db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
         statement = select(AssignmentDB).order_by(
             AssignmentDB.shift_id,
             AssignmentDB.employee_id

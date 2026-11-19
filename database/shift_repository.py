@@ -6,8 +6,12 @@ from database.db import engine
 from database.models import ShiftDB
 
 
-def add_shift(shift):
-    with Session(engine) as session:
+
+def add_shift(shift, db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         existing_shift = session.get(
             ShiftDB,
             shift.shift_id
@@ -31,13 +35,19 @@ def add_shift(shift):
         print(f"Shift {shift.shift_id} saved successfully!")
 
 
-def add_shifts(shifts):
+
+def add_shifts(shifts, db_engine=None):
     for shift in shifts:
-        add_shift(shift)
+        add_shift(shift, db_engine=db_engine)
 
 
-def get_all_shifts():
-    with Session(engine) as session:
+
+
+def get_all_shifts(db_engine=None):
+    active_engine = db_engine if db_engine is not None else engine
+
+    with Session(active_engine) as session:
+
         statement = select(ShiftDB).order_by(
             ShiftDB.date,
             ShiftDB.start_time

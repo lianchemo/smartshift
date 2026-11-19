@@ -265,17 +265,13 @@ else:
             '<p>Optimization with Google OR-Tools · Python · Streamlit · SQLAlchemy · SQLite</p>'
             '</div>', unsafe_allow_html=True
         )
-        st.divider()
-        st.subheader("Authorized Access")
-
-        # Google login is available during local development only.
-        # The public deployment exposes isolated demo sessions.
-        import os
-
         if st.secrets.get("app", {}).get("show_google_login", False):
+            st.divider()
+            st.subheader("Authorized Access")
+
             if st.button(
-                "🔐 Sign in with Google",
-                use_container_width=True
+                    "🔐 Sign in with Google",
+                    use_container_width=True
             ):
                 st.login()
 

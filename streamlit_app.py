@@ -1221,9 +1221,12 @@ if view == "Manager Dashboard":
         ["📱 Daily View", "📊 Table View"]
     )
 
+
     with cards_tab:
-        detail_columns = st.columns(2)
         for day_index, row in enumerate(weekly_grid_rows):
+            if day_index % 2 == 0:
+                detail_columns = st.columns(2)
+
             day_label = html_escape(row["Day"])
             slots_html = []
             for icon, title, key in (

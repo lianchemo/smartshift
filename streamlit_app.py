@@ -459,9 +459,13 @@ if view == "Manager Dashboard":
         st.info("No shifts for this week yet. Use Create Weekly Shifts below.")
     else:
         from html import escape as _escape
-        day_columns = st.columns(4)
+
         for day_offset in range(7):
+            if day_offset % 4 == 0:
+                day_columns = st.columns(4)
+
             current_day = dashboard_week_start + timedelta(days=day_offset)
+
             day_shifts = sorted(
                 (shift for shift in dashboard_shifts if shift.date == current_day),
                 key=lambda item: item.start_time
@@ -1999,9 +2003,13 @@ else:
         total_hours = total_minutes / 60
 
         st.caption(f"{len(display_rows)} shifts · {total_hours:g} scheduled hours")
-        personal_columns = st.columns(2)
+
         for shift_index, shift_row in enumerate(display_rows):
+            if shift_index % 2 == 0:
+                personal_columns = st.columns(2)
+
             with personal_columns[shift_index % 2]:
+
                 st.markdown(
                     '<div class="ss-personal-shift">'
                     f'<div class="ss-date">📅 {html_escape(shift_row["Day"])} · '
